@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 
-import configparser
 import argparse
 import logging
 import os
 import sys
 
 SYSFS_PATH = "/sys/module/hid_fanatec/drivers/hid:fanatec/"
-PROFILE_FILE = "profiles.ini"
-
-# Custom ConfigParser to preserve case
-class CaseSensitiveConfigParser(configparser.ConfigParser):
-    def optionxform(self, optionstr):
-        return optionstr  # Preserve case of option names
+PROFILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
 
 # Recursive file search
 def search_filepath(top: str, filename: str, max_depth: int = 3) -> str:
@@ -32,25 +26,35 @@ def search_filepath(top: str, filename: str, max_depth: int = 3) -> str:
     raise FileNotFoundError(f'{filename} not found in {top}.')
 
 # Configure driver
-def apply_configuration(profile_file: str, profile_name: str, device_path: str):
+def apply_configuration(profile_file: str, device_path: str):
     if not os.path.isfile(profile_file):
         raise FileNotFoundError(f'Profile file {profile_file} does not exist.')
+    
+    # logging.debug(f"Profile: {profile_file}")
 
-    config = CaseSensitiveConfigParser()
-    config.read(profile_file)
-
-    if config.has_section(profile_name):
-        for name, value in config.items(profile_name):
-            fpath = os.path.join(device_path, name)
-            if not os.path.isfile(fpath):
-                logging.debug(f'{name} does not exist (skipped).')
+    config = {}
+    with open(profile_file, 'r') as file:
+        for line in file:
+            line = line.strip()
+            
+            if line.startswith(';') or line == '':
                 continue
 
-            with open(fpath, "w") as f:
-                f.write(str(value))
-            logging.debug(f'{name} set to {value}')
-    else:
-        logging.error(f'Profile {profile_name} not found in configuration.')
+            key_value = line.split('=')
+            if len(key_value) == 2:
+                key = key_value[0].strip()
+                value = key_value[1].strip()
+                config[key] = value
+
+    for name, value in config.items():
+        fpath = os.path.join(device_path, name)
+        if not os.path.isfile(fpath):
+            logging.debug(f'{name} does not exist (skipped).')
+            continue
+
+        with open(fpath, "w") as f:
+            f.write(str(value))
+        logging.debug(f'{name} set to {value}')
 
 # Main function
 def main():
@@ -58,7 +62,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('profile', type=str, help='Profile name to apply.')
-    parser.add_argument('-c', '--config', type=str, help='Path to the configuration file containing profiles.')
+    parser.add_argument('-c', '--config', type=str, default=PROFILE_PATH, help='Path to the profiles.')
     parser.add_argument('-w', '--working_dir', type=str, default=SYSFS_PATH, help='Directory to search for Fanatec tuning files.')
     args = parser.parse_args()
 
@@ -72,9 +76,8 @@ def main():
             device_name = f.read().strip()
             logging.info(f'Device: {device_name}')
 
-        profiles_ini_path = args.config or os.path.join(os.path.dirname(os.path.abspath(__file__)), PROFILE_FILE)
-
-        apply_configuration(profile_file=profiles_ini_path, profile_name=args.profile, device_path=device_path)
+        profile_file = os.path.join(args.config,f"{args.profile}.ini")
+        apply_configuration(profile_file=profile_file, device_path=device_path)
         sys.exit(0)
 
     except Exception as e:
